@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 export default function SignUp() {
   const router = useRouter();
 
+  const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [designation, setDesignation] = useState('');
   const [email, setEmail] = useState('');
@@ -30,7 +31,7 @@ export default function SignUp() {
     setError('');
     setSuccess('');
 
-    if (!username.trim() || !email.trim() || !password) {
+    if (!name.trim() || !username.trim() || !email.trim() || !password) {
       setError('Please fill all required fields.');
       return;
     }
@@ -52,7 +53,7 @@ export default function SignUp() {
       const res = await fetch('http://localhost:8080/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), designation: designation.trim(), email: email.trim(), password }),
+        body: JSON.stringify({ name: name.trim(), username: username.trim(), designation: designation.trim(), email: email.trim(), password }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -95,6 +96,19 @@ export default function SignUp() {
 
           <View style={styles.field}>
             <Ionicons name="person" size={18} color="#cfe8ff" style={{ marginRight: 8 }} />
+            <TextInput
+              placeholder="Full Name"
+              placeholderTextColor="rgba(200,220,255,0.5)"
+              value={name}
+              onChangeText={setName}
+              style={styles.input}
+              testID="nameInput"
+              autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Ionicons name="person-circle" size={18} color="#cfe8ff" style={{ marginRight: 8 }} />
             <TextInput
               placeholder="Username"
               placeholderTextColor="rgba(200,220,255,0.5)"
@@ -172,7 +186,7 @@ export default function SignUp() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   background: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  inner: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  inner: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   card: { width: '90%', padding: 20, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.06)', borderWidth: 1 },
   title: { color: '#e8f7ff', fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 14 },
   field: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.02)', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, marginBottom: 10 },

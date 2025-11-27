@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, Stat
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SignIn() {
   const router = useRouter();
@@ -32,9 +33,49 @@ export default function SignIn() {
       const data = await res.json().catch(() => ({}));
 
       if (res.status === 200) {
-        setSuccess('Signed in — redirecting...');
-        // If backend returns a token, you can store it here (AsyncStorage/SecureStore)
-        setTimeout(() => router.replace('/'), 800);
+        const { id, username } = data;
+        console.log('Login successful, user data:', { id, username });
+        setSuccess('Signed in — loading profile...');
+        
+        // Store user ID and username
+        await AsyncStorage.setItem('userId', id.toString());
+        await AsyncStorage.setItem('username', username);
+        
+        // Store basic login data as fallback profile since /api/user/ has CORS issues
+        const loginBasedProfile = {
+          name: username, // We only have username from login response
+          username: username,
+          designation: 'User', // Default since not available in login response
+          email: `${username}@domain.com`, // Placeholder since not available
+          corsIssue: true
+        };
+        await AsyncStorage.setItem('userProfile', JSON.stringify(loginBasedProfile));
+        console.log('Stored login-based profile data:', loginBasedProfile);
+        
+        // Try to fetch detailed profile (will likely fail due to CORS)
+        try {
+          console.log(`Attempting to fetch detailed profile for user ID: ${id}`);
+          const profileRes = await fetch(`http://localhost:8080/api/user/${id}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          const profileData = await profileRes.json().catch(() => ({}));
+          
+          console.log('Detailed profile API response:', profileData);
+          
+          if (profileRes.status === 200) {
+            // Override with real data if successful
+            await AsyncStorage.setItem('userProfile', JSON.stringify(profileData));
+            console.log('Real profile data stored successfully');
+          } else {
+            console.log('Detailed profile fetch failed with status:', profileRes.status);
+          }
+        } catch (e) {
+          console.log('Expected: Detailed profile fetch blocked by CORS:', e.message);
+          // We already have fallback data stored above
+        }
+        
+        setTimeout(() => router.replace('/profile'), 800);
         return;
       }
 
@@ -96,6 +137,10 @@ export default function SignIn() {
             <Text style={styles.primaryText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/profile')} activeOpacity={0.85}>
+            <Text style={styles.secondaryText}>View Demo Profile</Text>
+          </TouchableOpacity>
+
           <View style={styles.row}>
             <Text style={styles.lightText}>Don't have an account? </Text>
             <TouchableOpacity onPress={() => router.push('/signup')}>
@@ -111,7 +156,7 @@ export default function SignIn() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   background: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  inner: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  inner: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
   card: { width: '90%', padding: 20, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.06)', borderWidth: 1 },
   title: { color: '#e8f7ff', fontSize: 22, fontWeight: '700', textAlign: 'center', marginBottom: 14 },
   field: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.02)', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, marginBottom: 10 },
@@ -123,4 +168,6 @@ const styles = StyleSheet.create({
   linkText: { color: '#cfe8ff', fontWeight: '700' },
   errorText: { color: '#ffccd1', marginBottom: 8, textAlign: 'center' },
   successText: { color: '#b6ffd6', marginBottom: 8, textAlign: 'center', fontWeight: '700' },
+  secondaryButton: { marginTop: 10, borderWidth: 1, borderColor: 'rgba(207,232,255,0.12)', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  secondaryText: { color: '#cfe8ff', fontWeight: '700' },
 });
