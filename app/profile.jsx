@@ -19,14 +19,90 @@ export default function ProfileDemo() {
   const [collaboratorIds, setCollaboratorIds] = useState([2, 3]); // Array to store individual IDs
   const [currentCollaboratorInput, setCurrentCollaboratorInput] = useState(''); // Current input field value
   const [loading, setLoading] = useState(false);
+  
+  // Contact management states
+  const [showContactForm, setShowContactForm] = useState(false);
+  const [showContactsList, setShowContactsList] = useState(false);
+  const [contacts, setContacts] = useState([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [editingContact, setEditingContact] = useState(null);
+  const [contactForm, setContactForm] = useState({
+    name: '',
+    institution: '',
+    designation: '',
+    phone: '',
+    phone2: '',
+    email: '',
+    whatsapp: '',
+    isCurrent: true,
+    relevantDept: '',
+    extraInfo: ''
+  });
+  const [showDepartmentSidebar, setShowDepartmentSidebar] = useState(false);
+  const [selectedDepartments, setSelectedDepartments] = useState([]);
+  
+  // Search functionality states
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
+  const [searchFilters, setSearchFilters] = useState({
+    name: '',
+    institution: '',
+    designation: '',
+    relevantDept: ''
+  });
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+  const [showingSearchResults, setShowingSearchResults] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [user, setUser] = useState(null);
   const [userId, setUserId] = useState(null);
+  const [userMapping, setUserMapping] = useState({}); // Map user_id to {name, designation}
+  const [showUserSelector, setShowUserSelector] = useState(false);
+  const [selectedCollaborators, setSelectedCollaborators] = useState([]);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
 
   useEffect(() => {
     loadUserData();
+    fetchUserMapping();
   }, []);
+
+  const fetchUserMapping = async () => {
+    try {
+      console.log('Fetching user mapping for ID to name/designation conversion');
+      
+      const response = await fetch('http://localhost:8080/api/user/all', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      console.log('User mapping fetch response status:', response.status);
+      
+      if (response.ok) {
+        const usersData = await response.json();
+        console.log('Users data received:', usersData);
+        
+        // Create mapping from userid to {name, designation}
+        const mapping = {};
+        const usersArray = Array.isArray(usersData) ? usersData : [usersData];
+        
+        usersArray.forEach(user => {
+          if (user.userid) {
+            mapping[user.userid] = {
+              name: user.name || user.username || 'Unknown User',
+              designation: user.designation || 'No designation'
+            };
+          }
+        });
+        
+        console.log('User mapping created:', mapping);
+        setUserMapping(mapping);
+      } else {
+        console.log('Failed to fetch users for mapping, status:', response.status);
+      }
+    } catch (e) {
+      console.log('Error fetching user mapping:', e);
+    }
+  };
 
   const loadUserData = async () => {
     try {
@@ -358,6 +434,305 @@ export default function ProfileDemo() {
     fetchMeetings(); // Reload all meetings
   };
 
+  // Function to convert collaborator IDs to display names
+  const formatCollaborators = (collaboratorsIdString) => {
+    if (!collaboratorsIdString || !userMapping) return collaboratorsIdString;
+    
+    // Split the comma-separated IDs and convert each
+    const ids = collaboratorsIdString.split(',').map(id => id.trim());
+    const formattedCollaborators = ids.map(id => {
+      const userId = parseInt(id);
+      if (userMapping[userId]) {
+        const user = userMapping[userId];
+        return `${user.name} (${user.designation})`;
+      }
+      return `ID: ${id}`; // Fallback if user not found in mapping
+    });
+    
+    return formattedCollaborators.join(', ');
+  };
+
+  // User selection functions
+  const toggleCollaborator = (userId) => {
+    const updatedCollaborators = selectedCollaborators.includes(userId)
+      ? selectedCollaborators.filter(id => id !== userId)
+      : [...selectedCollaborators, userId];
+    
+    setSelectedCollaborators(updatedCollaborators);
+    setCollaboratorIds(updatedCollaborators);
+    setMeetingForm({...meetingForm, collaboratorsId: updatedCollaborators.join(', ')});
+  };
+
+  const openUserSelector = () => {
+    // Initialize selected collaborators from current form value
+    const currentCollaborators = collaboratorIds.length > 0 ? collaboratorIds : [];
+    setSelectedCollaborators(currentCollaborators);
+    setUserSearchQuery(''); // Clear search when opening
+    setShowUserSelector(true);
+  };
+
+  // Filter users based on search query
+  const getFilteredUsers = () => {
+    if (!userSearchQuery.trim()) {
+      return Object.entries(userMapping);
+    }
+    
+    return Object.entries(userMapping).filter(([userId, userInfo]) => 
+      userInfo.name.toLowerCase().includes(userSearchQuery.toLowerCase())
+    );
+  };
+
+  // Department options
+  const departmentOptions = [
+    'Sales and Marketing',
+    'TRP',
+    'Finance and Accounting',
+    'Administration and Procurement',
+    'Operation'
+  ];
+
+  // Department selection functions
+  const toggleDepartment = (department) => {
+    const updatedDepts = selectedDepartments.includes(department)
+      ? selectedDepartments.filter(d => d !== department)
+      : [...selectedDepartments, department];
+    
+    setSelectedDepartments(updatedDepts);
+    setContactForm({...contactForm, relevantDept: updatedDepts.join(',')});
+  };
+
+  const openDepartmentSidebar = () => {
+    // Initialize selected departments from current form value
+    const currentDepts = contactForm.relevantDept 
+      ? contactForm.relevantDept.split(',').map(d => d.trim()).filter(d => d)
+      : [];
+    setSelectedDepartments(currentDepts);
+    setShowDepartmentSidebar(true);
+  };
+
+  // Search functionality
+  const searchContacts = async () => {
+    setIsSearching(true);
+    setError('');
+    
+    try {
+      // Send empty strings for empty fields as requested
+      const cleanedFilters = {
+        name: searchFilters.name.trim() || "",
+        institution: searchFilters.institution.trim() || "",
+        designation: searchFilters.designation.trim() || "",
+        relevantDept: searchFilters.relevantDept.trim() || ""
+      };
+      
+      console.log('Searching contacts with filters:', cleanedFilters);
+      
+      const response = await fetch('http://localhost:8080/api/contact/filter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleanedFilters)
+      });
+      
+      console.log('Search response status:', response.status);
+      
+      if (response.ok) {
+        const searchData = await response.json();
+        console.log('Search results received:', searchData);
+        
+        const resultsArray = Array.isArray(searchData) ? searchData : [searchData];
+        setSearchResults(resultsArray);
+        setContacts(resultsArray);
+        setShowingSearchResults(true);
+        setShowSearchPanel(false);
+        setSuccess(`Found ${resultsArray.length} contact(s) matching your criteria`);
+        setTimeout(() => setSuccess(''), 3000);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.message || `Search failed (${response.status})`);
+      }
+    } catch (e) {
+      console.log('Error searching contacts:', e);
+      setError('Network error - check connection and backend server');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchFilters({
+      name: '',
+      institution: '',
+      designation: '',
+      relevantDept: ''
+    });
+    setSearchResults([]);
+    setShowingSearchResults(false);
+    setShowSearchPanel(false);
+    fetchContacts(); // Reload all contacts
+  };
+
+  // Contact management functions
+  const fetchContacts = async () => {
+    setContactsLoading(true);
+    setError('');
+    
+    try {
+      console.log('Fetching all contacts');
+      
+      const response = await fetch('http://localhost:8080/api/contact/all', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      console.log('Contacts fetch response status:', response.status);
+      
+      if (response.ok) {
+        const contactsData = await response.json();
+        console.log('Contacts data received:', contactsData);
+        
+        const contactsArray = Array.isArray(contactsData) ? contactsData : [contactsData];
+        setContacts(contactsArray);
+        setShowContactsList(true);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setError(errorData.message || `Failed to fetch contacts (${response.status})`);
+      }
+    } catch (e) {
+      console.log('Error fetching contacts:', e);
+      setError('Network error - check connection and backend server');
+    } finally {
+      setContactsLoading(false);
+    }
+  };
+
+  const handleAddContact = async () => {
+    setError('');
+    setSuccess('');
+    
+    // Validate required fields
+    if (!contactForm.name.trim()) {
+      setError('Please enter contact name');
+      return;
+    }
+    if (!contactForm.phone.trim()) {
+      setError('Please enter phone number');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const isEditing = editingContact !== null;
+      let url = 'http://localhost:8080/api/contact/create';
+      
+      if (isEditing) {
+        // Try different possible ID field names
+        const contactId = editingContact.id || editingContact.contactId || editingContact._id || editingContact.ID;
+        
+        if (!contactId) {
+          setError('Contact ID not found - cannot update contact');
+          setLoading(false);
+          return;
+        }
+        
+        url = `http://localhost:8080/api/contact/update/${contactId}`;
+        console.log('Updating contact with ID:', contactId, 'Full contact object:', editingContact);
+      }
+      
+      console.log(`${isEditing ? 'Updating' : 'Creating'} contact:`, contactForm);
+      
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...contactForm,
+          phone2: contactForm.phone2 || null
+        }),
+      });
+
+      console.log('Contact operation response status:', res.status);
+      const data = await res.json().catch(() => ({}));
+      console.log('Contact operation response data:', data);
+
+      if (res.status === 200 || res.status === 201) {
+        setSuccess(`Contact ${isEditing ? 'updated' : 'created'} successfully!`);
+        setContactForm({
+          name: '',
+          institution: '',
+          designation: '',
+          phone: '',
+          phone2: '',
+          email: '',
+          whatsapp: '',
+          isCurrent: true,
+          relevantDept: '',
+          extraInfo: ''
+        });
+        setSelectedDepartments([]);
+        setEditingContact(null);
+        setTimeout(() => setShowContactForm(false), 1500);
+        // Refresh contacts list if it's open
+        if (showContactsList) {
+          fetchContacts();
+        }
+        return;
+      }
+
+      setError(data.error || data.message || `Server error (${res.status})`);
+    } catch (e) {
+      console.log('Contact operation error:', e);
+      setError('Network error — check connection and backend server');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const editContact = (contact) => {
+    console.log('Editing contact:', contact);
+    console.log('Contact ID fields:', {
+      id: contact.id,
+      contactId: contact.contactId,
+      _id: contact._id,
+      ID: contact.ID
+    });
+    
+    const contactDepts = contact.relevantDept 
+      ? contact.relevantDept.split(',').map(d => d.trim()).filter(d => d)
+      : [];
+    
+    setContactForm({
+      name: contact.name || '',
+      institution: contact.institution || '',
+      designation: contact.designation || '',
+      phone: contact.phone || '',
+      phone2: contact.phone2 || '',
+      email: contact.email || '',
+      whatsapp: contact.whatsapp || '',
+      isCurrent: contact.isCurrent !== undefined ? contact.isCurrent : true,
+      relevantDept: contact.relevantDept || '',
+      extraInfo: contact.extraInfo || ''
+    });
+    setSelectedDepartments(contactDepts);
+    setEditingContact(contact);
+    setShowContactForm(true);
+    setShowContactsList(false);
+  };
+
+  const cancelEdit = () => {
+    setEditingContact(null);
+    setSelectedDepartments([]);
+    setContactForm({
+      name: '',
+      institution: '',
+      designation: '',
+      phone: '',
+      phone2: '',
+      email: '',
+      whatsapp: '',
+      isCurrent: true,
+      relevantDept: '',
+      extraInfo: ''
+    });
+  };
+
   const handleAddMeeting = async () => {
     setError('');
     setSuccess('');
@@ -426,6 +801,7 @@ export default function ProfileDemo() {
           agenda: ''
         });
         setCollaboratorIds([]);
+        setSelectedCollaborators([]);
         setCurrentCollaboratorInput('');
         setTimeout(() => setShowMeetingForm(false), 1500);
         return;
@@ -525,6 +901,16 @@ export default function ProfileDemo() {
           <Ionicons name="calendar" size={20} color="#9fcfff" style={{ marginRight: 8 }} />
           <Text style={styles.secondaryButtonText}>{meetingsLoading ? 'Loading...' : 'See Meetings I Created'}</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity style={styles.addButton} onPress={() => setShowContactForm(true)} activeOpacity={0.85}>
+          <Ionicons name="person-add" size={20} color="#fff" style={{ marginRight: 8 }} />
+          <Text style={styles.addButtonText}>Add Contact</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.secondaryButton} onPress={fetchContacts} activeOpacity={0.85}>
+          <Ionicons name="people" size={20} color="#9fcfff" style={{ marginRight: 8 }} />
+          <Text style={styles.secondaryButtonText}>{contactsLoading ? 'Loading...' : 'View Contacts'}</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <Modal visible={showMeetingForm} transparent={true} animationType="slide">
@@ -532,7 +918,11 @@ export default function ProfileDemo() {
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Create Meeting</Text>
-              <TouchableOpacity onPress={() => setShowMeetingForm(false)}>
+              <TouchableOpacity onPress={() => {
+                setShowMeetingForm(false);
+                setShowUserSelector(false);
+                setUserSearchQuery('');
+              }}>
                 <Ionicons name="close" size={24} color="#cfe8ff" />
               </TouchableOpacity>
             </View>
@@ -541,38 +931,41 @@ export default function ProfileDemo() {
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
             <View style={styles.formField}>
-              <Text style={styles.fieldLabel}>Collaborators ID</Text>
-              <Text style={styles.fieldHelper}>Enter ID and press Enter to add</Text>
+              <Text style={styles.fieldLabel}>Collaborators</Text>
+              <Text style={styles.fieldHelper}>Select users to collaborate with</Text>
               
-              {/* Selected IDs Display */}
+              {/* Selected Collaborators Display */}
               {collaboratorIds.length > 0 && (
                 <View style={styles.selectedIdsContainer}>
-                  {collaboratorIds.map((id) => (
-                    <View key={id} style={styles.selectedIdTag}>
-                      <Text style={styles.selectedIdText}>{id}</Text>
-                      <TouchableOpacity 
-                        onPress={() => removeCollaboratorId(id)}
-                        style={styles.removeIdButton}
-                      >
-                        <Ionicons name="close-circle" size={16} color="rgba(255,100,100,0.8)" />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
+                  {collaboratorIds.map((id) => {
+                    const userInfo = userMapping[id];
+                    const displayText = userInfo ? `${userInfo.name} (${userInfo.designation})` : `ID: ${id}`;
+                    return (
+                      <View key={id} style={styles.selectedIdTag}>
+                        <Text style={styles.selectedIdText}>{displayText}</Text>
+                        <TouchableOpacity 
+                          onPress={() => removeCollaboratorId(id)}
+                          style={styles.removeIdButton}
+                        >
+                          <Ionicons name="close-circle" size={16} color="rgba(255,100,100,0.8)" />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
                 </View>
               )}
               
-              {/* Input Field */}
-              <TextInput
-                style={styles.formInput}
-                value={currentCollaboratorInput}
-                onChangeText={setCurrentCollaboratorInput}
-                onKeyPress={handleCollaboratorKeyPress}
-                placeholder="Enter collaborator ID (e.g., 5)"
-                placeholderTextColor="rgba(200,220,255,0.5)"
-                keyboardType="numeric"
-                returnKeyType="done"
-                onSubmitEditing={addCollaboratorId}
-              />
+              {/* User Selector */}
+              <TouchableOpacity 
+                style={styles.departmentSelector}
+                onPress={openUserSelector}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.departmentSelectorText}>
+                  {collaboratorIds.length > 0 ? `${collaboratorIds.length} collaborator${collaboratorIds.length !== 1 ? 's' : ''} selected` : 'Select collaborators'}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#9fcfff" />
+              </TouchableOpacity>
             </View>
 
             <View style={styles.formField}>
@@ -691,7 +1084,7 @@ export default function ProfileDemo() {
                     
                     <View style={styles.meetingDetail}>
                       <Ionicons name="people" size={14} color="#bfe0ff" />
-                      <Text style={styles.meetingDetailText}>Collaborators: {meeting.collaboratorsId}</Text>
+                      <Text style={styles.meetingDetailText}>Collaborators: {formatCollaborators(meeting.collaboratorsId)}</Text>
                     </View>
                     
                     <View style={styles.meetingDetail}>
@@ -738,6 +1131,546 @@ export default function ProfileDemo() {
               <Ionicons name="refresh" size={18} color="#9fcfff" style={{ marginRight: 6 }} />
               <Text style={styles.refreshMeetingsText}>Refresh Meetings</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Contact Form Modal */}
+      <Modal visible={showContactForm} transparent={true} animationType="slide">
+        <View style={styles.modalOverlay}>
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 20 }}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{editingContact ? 'Edit Contact' : 'Add Contact'}</Text>
+                <TouchableOpacity onPress={() => {
+                  setShowContactForm(false);
+                  setShowDepartmentSidebar(false);
+                  cancelEdit();
+                }}>
+                  <Ionicons name="close" size={24} color="#cfe8ff" />
+                </TouchableOpacity>
+              </View>
+
+              {success ? <Text style={styles.successText}>{success}</Text> : null}
+              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Name *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactForm.name}
+                  onChangeText={(text) => setContactForm({...contactForm, name: text})}
+                  placeholder="Enter full name"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Institution</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactForm.institution}
+                  onChangeText={(text) => setContactForm({...contactForm, institution: text})}
+                  placeholder="Company/Organization name"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Designation</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactForm.designation}
+                  onChangeText={(text) => setContactForm({...contactForm, designation: text})}
+                  placeholder="Job title/position"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Phone *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactForm.phone}
+                  onChangeText={(text) => setContactForm({...contactForm, phone: text})}
+                  placeholder="Primary phone number"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Phone 2</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactForm.phone2}
+                  onChangeText={(text) => setContactForm({...contactForm, phone2: text})}
+                  placeholder="Secondary phone number"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Email</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactForm.email}
+                  onChangeText={(text) => setContactForm({...contactForm, email: text})}
+                  placeholder="Email address"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                  keyboardType="email-address"
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>WhatsApp</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={contactForm.whatsapp}
+                  onChangeText={(text) => setContactForm({...contactForm, whatsapp: text})}
+                  placeholder="WhatsApp number"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Relevant Departments</Text>
+                <TouchableOpacity 
+                  style={styles.departmentSelector}
+                  onPress={openDepartmentSidebar}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.departmentSelectorText}>
+                    {contactForm.relevantDept || 'Select departments'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color="#9fcfff" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.formField}>
+                <TouchableOpacity 
+                  style={styles.checkboxContainer}
+                  onPress={() => setContactForm({...contactForm, isCurrent: !contactForm.isCurrent})}
+                >
+                  <Ionicons 
+                    name={contactForm.isCurrent ? "checkbox" : "square-outline"} 
+                    size={20} 
+                    color={contactForm.isCurrent ? "#9fcfff" : "rgba(200,220,255,0.5)"} 
+                  />
+                  <Text style={styles.checkboxText}>Currently Active Contact</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.formField}>
+                <Text style={styles.fieldLabel}>Extra Information</Text>
+                <TextInput
+                  style={[styles.formInput, { height: 80, textAlignVertical: 'top' }]}
+                  value={contactForm.extraInfo}
+                  onChangeText={(text) => setContactForm({...contactForm, extraInfo: text})}
+                  placeholder="Additional notes or information"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                  multiline
+                />
+              </View>
+
+              <TouchableOpacity style={styles.submitButton} onPress={handleAddContact} activeOpacity={0.85}>
+                <Text style={styles.submitText}>{loading ? (editingContact ? 'Updating...' : 'Creating...') : (editingContact ? 'Update Contact' : 'Create Contact')}</Text>
+              </TouchableOpacity>
+
+              {editingContact && (
+                <TouchableOpacity style={styles.cancelButton} onPress={cancelEdit} activeOpacity={0.85}>
+                  <Text style={styles.cancelButtonText}>Cancel Edit</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Contacts List Modal */}
+      <Modal visible={showContactsList} transparent={true} animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{showingSearchResults ? 'Search Results' : 'All Contacts'}</Text>
+              <View style={styles.headerButtons}>
+                <TouchableOpacity 
+                  style={styles.searchButton}
+                  onPress={() => setShowSearchPanel(true)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="search" size={20} color="#9fcfff" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowContactsList(false)} style={{ marginLeft: 12 }}>
+                  <Ionicons name="close" size={24} color="#cfe8ff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {success ? <Text style={styles.successText}>{success}</Text> : null}
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            {showingSearchResults && (
+              <View style={styles.searchStatus}>
+                <Text style={styles.searchStatusText}>Showing search results</Text>
+                <TouchableOpacity 
+                  style={styles.clearSearchButton}
+                  onPress={clearSearch}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close-circle" size={16} color="#ffccd1" />
+                  <Text style={styles.clearSearchText}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <ScrollView style={{ maxHeight: 500 }}>
+              {contacts.length > 0 ? (
+                contacts.map((contact, index) => (
+                  <View key={contact.id || contact.contactId || contact._id || contact.ID || index} style={styles.contactCard}>
+                    <View style={styles.contactHeader}>
+                      <View style={styles.contactTitleContainer}>
+                        <Ionicons name="person" size={16} color="#9fcfff" />
+                        <Text style={styles.contactName}>{contact.name}</Text>
+                        {!contact.isCurrent && <Text style={styles.inactiveTag}>Inactive</Text>}
+                      </View>
+                      <TouchableOpacity 
+                        onPress={() => editContact(contact)}
+                        style={styles.editButton}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="pencil" size={16} color="rgba(100,200,255,0.8)" />
+                      </TouchableOpacity>
+                    </View>
+                    
+                    {contact.institution && (
+                      <View style={styles.contactDetail}>
+                        <Ionicons name="business" size={14} color="#bfe0ff" />
+                        <Text style={styles.contactDetailText}>{contact.institution}</Text>
+                      </View>
+                    )}
+                    
+                    {contact.designation && (
+                      <View style={styles.contactDetail}>
+                        <Ionicons name="briefcase" size={14} color="#bfe0ff" />
+                        <Text style={styles.contactDetailText}>{contact.designation}</Text>
+                      </View>
+                    )}
+                    
+                    <View style={styles.contactDetail}>
+                      <Ionicons name="call" size={14} color="#bfe0ff" />
+                      <Text style={styles.contactDetailText}>{contact.phone}</Text>
+                    </View>
+                    
+                    {contact.phone2 && (
+                      <View style={styles.contactDetail}>
+                        <Ionicons name="call" size={14} color="#bfe0ff" />
+                        <Text style={styles.contactDetailText}>{contact.phone2} (Alt)</Text>
+                      </View>
+                    )}
+                    
+                    {contact.email && (
+                      <View style={styles.contactDetail}>
+                        <Ionicons name="mail" size={14} color="#bfe0ff" />
+                        <Text style={styles.contactDetailText}>{contact.email}</Text>
+                      </View>
+                    )}
+                    
+                    {contact.whatsapp && (
+                      <View style={styles.contactDetail}>
+                        <Ionicons name="logo-whatsapp" size={14} color="#bfe0ff" />
+                        <Text style={styles.contactDetailText}>{contact.whatsapp}</Text>
+                      </View>
+                    )}
+                    
+                    {contact.relevantDept && (
+                      <View style={styles.contactDetail}>
+                        <Ionicons name="library" size={14} color="#bfe0ff" />
+                        <Text style={styles.contactDetailText}>Depts: {contact.relevantDept}</Text>
+                      </View>
+                    )}
+                    
+                    {contact.extraInfo && (
+                      <View style={styles.contactDetail}>
+                        <Ionicons name="information-circle" size={14} color="#bfe0ff" />
+                        <Text style={styles.contactDetailText}>{contact.extraInfo}</Text>
+                      </View>
+                    )}
+                    
+                    <View style={styles.contactDetail}>
+                      <Ionicons name="finger-print" size={14} color="#bfe0ff" />
+                      <Text style={styles.contactDetailText}>ID: {contact.id || contact.contactId || contact._id || contact.ID || 'No ID found'}</Text>
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyState}>
+                  <Ionicons name="people-outline" size={48} color="rgba(207,232,255,0.3)" />
+                  <Text style={styles.emptyStateText}>No contacts found</Text>
+                  <Text style={styles.emptyStateSubtext}>Add your first contact to see it here</Text>
+                </View>
+              )}
+            </ScrollView>
+            
+            <TouchableOpacity 
+              style={styles.refreshMeetingsButton} 
+              onPress={fetchContacts} 
+              activeOpacity={0.85}
+            >
+              <Ionicons name="refresh" size={18} color="#9fcfff" style={{ marginRight: 6 }} />
+              <Text style={styles.refreshMeetingsText}>Refresh Contacts</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Department Selection Sidebar */}
+      <Modal visible={showDepartmentSidebar} transparent={true} animationType="slide">
+        <View style={styles.sidebarOverlay}>
+          <TouchableOpacity 
+            style={styles.sidebarBackdrop} 
+            onPress={() => setShowDepartmentSidebar(false)}
+            activeOpacity={1}
+          />
+          <View style={styles.sidebarContainer}>
+            <View style={styles.sidebarHeader}>
+              <Text style={styles.sidebarTitle}>Select Departments</Text>
+              <TouchableOpacity onPress={() => setShowDepartmentSidebar(false)}>
+                <Ionicons name="close" size={24} color="#cfe8ff" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.sidebarContent}>
+              {departmentOptions.map((department) => (
+                <TouchableOpacity
+                  key={department}
+                  style={[
+                    styles.departmentOption,
+                    selectedDepartments.includes(department) && styles.departmentOptionSelected
+                  ]}
+                  onPress={() => toggleDepartment(department)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.departmentOptionText,
+                    selectedDepartments.includes(department) && styles.departmentOptionTextSelected
+                  ]}>
+                    {department}
+                  </Text>
+                  <Ionicons 
+                    name={selectedDepartments.includes(department) ? "checkbox" : "square-outline"}
+                    size={20} 
+                    color={selectedDepartments.includes(department) ? "#9fcfff" : "rgba(200,220,255,0.5)"} 
+                  />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            
+            <View style={styles.sidebarFooter}>
+              <Text style={styles.selectedCount}>
+                {selectedDepartments.length} department{selectedDepartments.length !== 1 ? 's' : ''} selected
+              </Text>
+              <TouchableOpacity 
+                style={styles.sidebarDoneButton}
+                onPress={() => setShowDepartmentSidebar(false)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.sidebarDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* User Selection Sidebar */}
+      <Modal visible={showUserSelector} transparent={true} animationType="slide">
+        <View style={styles.sidebarOverlay}>
+          <TouchableOpacity 
+            style={styles.sidebarBackdrop} 
+            onPress={() => setShowUserSelector(false)}
+            activeOpacity={1}
+          />
+          <View style={styles.sidebarContainer}>
+            <View style={styles.sidebarHeader}>
+              <Text style={styles.sidebarTitle}>Select Collaborators</Text>
+              <TouchableOpacity onPress={() => {
+                setShowUserSelector(false);
+                setUserSearchQuery('');
+              }}>
+                <Ionicons name="close" size={24} color="#cfe8ff" />
+              </TouchableOpacity>
+            </View>
+            
+            {/* Search Input */}
+            <View style={styles.searchInputContainer}>
+              <View style={styles.searchInputWrapper}>
+                <Ionicons name="search" size={16} color="rgba(159,207,255,0.6)" style={styles.searchIcon} />
+                <TextInput
+                  style={styles.userSearchInput}
+                  value={userSearchQuery}
+                  onChangeText={setUserSearchQuery}
+                  placeholder="Search by name..."
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                  returnKeyType="search"
+                />
+                {userSearchQuery.length > 0 && (
+                  <TouchableOpacity 
+                    onPress={() => setUserSearchQuery('')}
+                    style={styles.clearSearchIcon}
+                  >
+                    <Ionicons name="close-circle" size={16} color="rgba(255,100,100,0.6)" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+            
+            <ScrollView style={styles.sidebarContent}>
+              {getFilteredUsers().map(([userId, userInfo]) => {
+                const userIdNum = parseInt(userId);
+                return (
+                  <TouchableOpacity
+                    key={userId}
+                    style={[
+                      styles.departmentOption,
+                      selectedCollaborators.includes(userIdNum) && styles.departmentOptionSelected
+                    ]}
+                    onPress={() => toggleCollaborator(userIdNum)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[
+                        styles.departmentOptionText,
+                        selectedCollaborators.includes(userIdNum) && styles.departmentOptionTextSelected
+                      ]}>
+                        {userInfo.name}
+                      </Text>
+                      <Text style={[
+                        styles.userDesignationText,
+                        selectedCollaborators.includes(userIdNum) && styles.userDesignationTextSelected
+                      ]}>
+                        {userInfo.designation}
+                      </Text>
+                    </View>
+                    <Ionicons 
+                      name={selectedCollaborators.includes(userIdNum) ? "checkbox" : "square-outline"}
+                      size={20} 
+                      color={selectedCollaborators.includes(userIdNum) ? "#9fcfff" : "rgba(200,220,255,0.5)"} 
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+              
+              {/* Empty State for Search */}
+              {userSearchQuery.trim() && getFilteredUsers().length === 0 && (
+                <View style={styles.emptySearchState}>
+                  <Ionicons name="search-outline" size={32} color="rgba(207,232,255,0.3)" />
+                  <Text style={styles.emptySearchText}>No users found</Text>
+                  <Text style={styles.emptySearchSubtext}>Try a different search term</Text>
+                </View>
+              )}
+            </ScrollView>
+            
+            <View style={styles.sidebarFooter}>
+              <Text style={styles.selectedCount}>
+                {selectedCollaborators.length} collaborator{selectedCollaborators.length !== 1 ? 's' : ''} selected
+              </Text>
+              <TouchableOpacity 
+                style={styles.sidebarDoneButton}
+                onPress={() => {
+                  setShowUserSelector(false);
+                  setUserSearchQuery('');
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.sidebarDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Contact Search Filter Panel */}
+      <Modal visible={showSearchPanel} transparent={true} animationType="slide">
+        <View style={styles.searchPanelOverlay}>
+          <TouchableOpacity 
+            style={styles.searchPanelBackdrop} 
+            onPress={() => setShowSearchPanel(false)}
+            activeOpacity={1}
+          />
+          <View style={styles.searchPanelContainer}>
+            <View style={styles.searchPanelHeader}>
+              <Text style={styles.searchPanelTitle}>Filter Contacts</Text>
+              <TouchableOpacity onPress={() => setShowSearchPanel(false)}>
+                <Ionicons name="close" size={24} color="#cfe8ff" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.searchPanelContent}>
+              <View style={styles.searchField}>
+                <Text style={styles.searchFieldLabel}>Name</Text>
+                <TextInput
+                  style={styles.searchInput}
+                  value={searchFilters.name}
+                  onChangeText={(text) => setSearchFilters({...searchFilters, name: text})}
+                  placeholder="Search by name"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                />
+              </View>
+
+              <View style={styles.searchField}>
+                <Text style={styles.searchFieldLabel}>Institution</Text>
+                <TextInput
+                  style={styles.searchInput}
+                  value={searchFilters.institution}
+                  onChangeText={(text) => setSearchFilters({...searchFilters, institution: text})}
+                  placeholder="Search by institution"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                />
+              </View>
+
+              <View style={styles.searchField}>
+                <Text style={styles.searchFieldLabel}>Designation</Text>
+                <TextInput
+                  style={styles.searchInput}
+                  value={searchFilters.designation}
+                  onChangeText={(text) => setSearchFilters({...searchFilters, designation: text})}
+                  placeholder="Search by designation"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                />
+              </View>
+
+              <View style={styles.searchField}>
+                <Text style={styles.searchFieldLabel}>Relevant Department</Text>
+                <TextInput
+                  style={styles.searchInput}
+                  value={searchFilters.relevantDept}
+                  onChangeText={(text) => setSearchFilters({...searchFilters, relevantDept: text})}
+                  placeholder="Search by department"
+                  placeholderTextColor="rgba(200,220,255,0.5)"
+                />
+              </View>
+            </ScrollView>
+            
+            <View style={styles.searchPanelFooter}>
+              <TouchableOpacity 
+                style={styles.clearFiltersButton}
+                onPress={() => setSearchFilters({ name: '', institution: '', designation: '', relevantDept: '' })}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.clearFiltersText}>Clear All</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.searchExecuteButton}
+                onPress={searchContacts}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="search" size={18} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.searchExecuteText}>{isSearching ? 'Searching...' : 'Search'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -812,4 +1745,74 @@ const styles = StyleSheet.create({
   errorText: { color: '#ffccd1', marginBottom: 8, textAlign: 'center' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#cfe8ff', fontSize: 16 },
+  
+  // Contact styles
+  contactCard: { backgroundColor: 'rgba(255,255,255,0.05)', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  contactHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  contactTitleContainer: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  contactName: { color: '#e8f7ff', fontWeight: '700', marginLeft: 6, flex: 1 },
+  inactiveTag: { color: '#ffccd1', fontSize: 10, backgroundColor: 'rgba(255,204,209,0.1)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
+  editButton: { padding: 8, borderRadius: 6, backgroundColor: 'rgba(100,200,255,0.1)', borderWidth: 1, borderColor: 'rgba(100,200,255,0.2)' },
+  contactDetail: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  contactDetailText: { color: 'rgba(235,245,255,0.85)', marginLeft: 6, flex: 1 },
+  checkboxContainer: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
+  checkboxText: { color: '#cfe8ff', marginLeft: 8, fontSize: 14 },
+  cancelButton: { backgroundColor: 'rgba(255,100,100,0.1)', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: 'rgba(255,100,100,0.2)' },
+  cancelButtonText: { color: 'rgba(255,100,100,0.8)', fontWeight: '700' },
+  
+  // Department selector styles
+  departmentSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(255,255,255,0.02)', paddingHorizontal: 12, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  departmentSelectorText: { color: '#fff', flex: 1 },
+  
+  // Sidebar styles
+  sidebarOverlay: { flex: 1, flexDirection: 'row' },
+  sidebarBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  sidebarContainer: { width: 300, backgroundColor: '#041226', borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.1)' },
+  sidebarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
+  sidebarTitle: { color: '#e8f7ff', fontSize: 18, fontWeight: '700' },
+  sidebarContent: { flex: 1, padding: 16 },
+  departmentOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 12, borderRadius: 8, marginBottom: 8, backgroundColor: 'rgba(255,255,255,0.02)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  departmentOptionSelected: { backgroundColor: 'rgba(159,207,255,0.1)', borderColor: 'rgba(159,207,255,0.3)' },
+  departmentOptionText: { color: 'rgba(235,245,255,0.85)', fontSize: 14, flex: 1 },
+  departmentOptionTextSelected: { color: '#9fcfff', fontWeight: '600' },
+  sidebarFooter: { padding: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selectedCount: { color: 'rgba(207,232,255,0.7)', fontSize: 12 },
+  sidebarDoneButton: { backgroundColor: 'rgba(159,207,255,0.2)', paddingHorizontal: 20, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(159,207,255,0.3)' },
+  sidebarDoneText: { color: '#9fcfff', fontWeight: '700' },
+  
+  // Search functionality styles
+  headerButtons: { flexDirection: 'row', alignItems: 'center' },
+  searchButton: { padding: 8, borderRadius: 6, backgroundColor: 'rgba(159,207,255,0.1)', borderWidth: 1, borderColor: 'rgba(159,207,255,0.2)' },
+  searchStatus: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(159,207,255,0.1)', padding: 10, borderRadius: 6, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(159,207,255,0.2)' },
+  searchStatusText: { color: '#9fcfff', fontSize: 12, fontWeight: '600' },
+  clearSearchButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,100,100,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: 'rgba(255,100,100,0.2)' },
+  clearSearchText: { color: '#ffccd1', fontSize: 10, marginLeft: 4 },
+  
+  // Search panel styles
+  searchPanelOverlay: { flex: 1, justifyContent: 'flex-start' },
+  searchPanelBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
+  searchPanelContainer: { backgroundColor: '#041226', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', maxHeight: '60%' },
+  searchPanelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
+  searchPanelTitle: { color: '#e8f7ff', fontSize: 18, fontWeight: '700' },
+  searchPanelContent: { padding: 16 },
+  searchField: { marginBottom: 16 },
+  searchFieldLabel: { color: '#cfe8ff', marginBottom: 6, fontWeight: '600', fontSize: 14 },
+  searchInput: { backgroundColor: 'rgba(255,255,255,0.02)', color: '#fff', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  searchPanelFooter: { padding: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  clearFiltersButton: { backgroundColor: 'rgba(255,100,100,0.1)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,100,100,0.2)' },
+  clearFiltersText: { color: 'rgba(255,100,100,0.8)', fontWeight: '600' },
+  searchExecuteButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(159,207,255,0.2)', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(159,207,255,0.3)' },
+  searchExecuteText: { color: '#9fcfff', fontWeight: '700' },
+  userDesignationText: { color: 'rgba(235,245,255,0.6)', fontSize: 12, marginTop: 2 },
+  userDesignationTextSelected: { color: 'rgba(159,207,255,0.8)', fontWeight: '500' },
+  
+  // User search styles
+  searchInputContainer: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
+  searchInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  searchIcon: { marginRight: 8 },
+  userSearchInput: { flex: 1, color: '#fff', fontSize: 14, paddingVertical: 0 },
+  clearSearchIcon: { marginLeft: 8, padding: 2 },
+  emptySearchState: { alignItems: 'center', paddingVertical: 32, paddingHorizontal: 20 },
+  emptySearchText: { color: '#cfe8ff', fontSize: 14, fontWeight: '600', marginTop: 8 },
+  emptySearchSubtext: { color: 'rgba(207,232,255,0.6)', fontSize: 12, marginTop: 4, textAlign: 'center' },
 });
